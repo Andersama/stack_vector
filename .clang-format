@@ -1,0 +1,16 @@
+# We'll use defaults from the LLVM style, but with 4 columns indentation.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 110
+#---
+Language: Cpp
+BinPackArguments: true
+BinPackParameters: true
+
+AlignConsecutiveDeclarations: true
+AlignConsecutiveAssignments: true
+
+NamespaceIndentation: All
+#---
+# single line settings
+AllowShortFunctionsOnASingleLine: false
