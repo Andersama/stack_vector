@@ -39,6 +39,7 @@ namespace stack_vector {
     }; // namespace details
 
     template <typename T, size_t N> struct stack_vector {
+        static_assert(N > 0, "a stack_vector<T,N> must have an N > 0");
       public:
         using element_type           = T;
         using value_type             = typename ::std::remove_cv<T>::type;
