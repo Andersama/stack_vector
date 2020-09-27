@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <algorithm>
 #include <array>
 #include <initializer_list>
 #include <iterator>
@@ -40,6 +41,7 @@ namespace stack_vector {
 
     template <typename T, size_t N> struct stack_vector {
         static_assert(N > 0, "a stack_vector<T,N> must have an N > 0");
+
       public:
         using element_type           = T;
         using value_type             = typename ::std::remove_cv<T>::type;
@@ -486,3 +488,40 @@ namespace stack_vector {
         }
     };
 } // namespace stack_vector
+
+// non-members
+template <class T, size_t N0, size_t N1>
+[[nodiscard]] bool operator==(const stack_vector::stack_vector<T, N0> &left,
+                              const stack_vector::stack_vector<T, N1> &right) {
+    return left.size() == right.size() && ::std::equal(left.begin(), left.end(), right.begin());
+}
+
+template <class T, size_t N0, size_t N1>
+[[nodiscard]] bool operator!=(const stack_vector::stack_vector<T, N0> &left,
+                              const stack_vector::stack_vector<T, N1> &right) {
+    return !(left == right);
+}
+
+template <class T, size_t N0, size_t N1>
+[[nodiscard]] bool operator<(const stack_vector::stack_vector<T, N0> &left,
+                             const stack_vector::stack_vector<T, N1> &right) {
+    return ::std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end());
+}
+
+template <class T, size_t N0, size_t N1>
+[[nodiscard]] bool operator>(const stack_vector::stack_vector<T, N0> &left,
+                             const stack_vector::stack_vector<T, N1> &right) {
+    return right < left;
+}
+
+template <class T, size_t N0, size_t N1>
+[[nodiscard]] bool operator<=(const stack_vector::stack_vector<T, N0> &left,
+                              const stack_vector::stack_vector<T, N1> &right) {
+    return !(right < left);
+}
+
+template <class T, size_t N0, size_t N1>
+[[nodiscard]] bool operator>=(const stack_vector::stack_vector<T, N0> &left,
+                              const stack_vector::stack_vector<T, N1> &right) {
+    return !(left < right);
+}
