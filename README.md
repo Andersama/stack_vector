@@ -1,5 +1,5 @@
 # stack_vector
-A fixed size vector, for dynamic arrays of known size
+A fixed capacity vector, for dynamic arrays of maximum known size
 
 Implements most of vector functions except those dealing with resizing.
 
