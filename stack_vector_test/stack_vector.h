@@ -66,14 +66,14 @@ namespace stack_vector {
             std::array<T, N> store;
         };
 
-        template <class It1> void insert_range(const_iterator pos, It1 _First, It1 _Last) {
-            // insert input range [_First, _Last) at _Where
-            if (_First == _Last) {
+        template <class It1> void insert_range(const_iterator pos, It1 first, It1 last) {
+            // insert input range [first, last) at _Where
+            if (first == last) {
                 return; // nothing to do, avoid invalidating iterators
             }
 
             pointer         old_begin  = &store[0];
-            pointer         old_last   = &store[0] + size();
+            pointer         oldlast    = &store[0] + size();
             const size_type insert_idx = pos - cbegin();
             const size_type old_size   = size();
             // For one-at-back, provide strong guarantee.
@@ -81,11 +81,24 @@ namespace stack_vector {
             // Performance note: except for one-at-back, emplace_back()'s strong guarantee is unnecessary
             // here.
 
-            for (; _First != _Last && size() < capacity(); ++_First) {
-                unchecked_emplace_back(*_First); // emplace_back(*_First);
+            for (; first != last && size() < capacity(); ++first) {
+                unchecked_emplace_back(*first); // emplace_back(*first);
             }
 
             ::std::rotate(begin() + insert_idx, begin() + old_size, end());
+        }
+
+        template <class It1> void append_range(It1 first, It1 last) {
+            if (first == last) {
+                return; // nothing to do, avoid invalidating iterators
+            }
+            // For one-at-back, provide strong guarantee.
+            // Otherwise, provide basic guarantee (despite N4659 26.3.11.5 [vector.modifiers]/1).
+            // Performance note: except for one-at-back, emplace_back()'s strong guarantee is unnecessary
+            // here.
+            for (; first != last && size() < capacity(); ++first) {
+                unchecked_emplace_back(*first); // emplace_back(*first);
+            }
         }
 
       public:
@@ -99,7 +112,7 @@ namespace stack_vector {
             assign(count, T());
         }
 
-        template <class some_iterator> stack_vector(some_iterator first, some_iterator last) {
+        template <class It1> stack_vector(It1 first, It1 last) {
             append(first, last);
         }
 
@@ -192,7 +205,7 @@ namespace stack_vector {
                     _size = count;
                 }
         };
-        template <class some_iterator> constexpr void assign(some_iterator first, some_iterator last) {
+        template <class It1> constexpr void assign(It1 first, It1 last) {
             size_t insert_count = ::std::distance(first, last);
             if ((size() + insert_count) <= capacity()) {
                 clear();
@@ -211,11 +224,16 @@ namespace stack_vector {
                 _size += count;
             }
         }
-        template <typename some_iterator> void append(some_iterator first, some_iterator last) {
-            size_t insert_count = ::std::distance(first, last);
-            if ((size() + insert_count) < capacity()) {
-                ::stack_vector::details::uninitialized_copy(first, last, end());
-                _size += insert_count;
+        template <typename It1> void append(It1 first, It1 last) {
+            if constexpr (::std::is_same<::std::random_access_iterator_tag,
+                                         ::std::iterator_traits<It1>::iterator_category>::value) {
+                size_t insert_count = ::std::distance(first, last);
+                if ((size() + insert_count) <= capacity()) {
+                    ::stack_vector::details::uninitialized_copy(first, last, end());
+                    _size += insert_count;
+                }
+            } else {
+                append_range(first, last);
             }
         }
 

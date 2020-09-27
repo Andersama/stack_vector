@@ -1,6 +1,6 @@
 ﻿// stack_vector_test.cpp : Defines the entry point for the application.
 //
-#include "stack_vector_test.h"
+#include "stack_vector.h"
 #include <iostream>
 #include <string>
 
@@ -71,6 +71,25 @@ int main() {
     assert(test_1[2] == 7 && "iterator value != ptr value");
 
     for (const auto &int_val : test_1) {
+        output += std::to_string(int_val) + "\n";
+    }
+    
+    output += "___\n";
+
+    stack_vector::stack_vector<int, 10> append_test;
+    append_test.append(test.begin(), test.end());
+    append_test.append(test_1.begin(), test_1.end());
+    size_t m = 0;
+    for (size_t i = 0; i < test.size(); i++) {
+        assert(append_test[m] == test[i] && "iterator value != ptr value");
+        m++;
+    }
+    for (size_t i = 0; i < test_1.size(); i++) {
+        assert(append_test[m] == test_1[i] && "iterator value != ptr value");
+        m++;
+    }
+
+    for (const auto &int_val : append_test) {
         output += std::to_string(int_val) + "\n";
     }
 
