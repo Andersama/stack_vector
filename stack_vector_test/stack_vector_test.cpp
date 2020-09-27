@@ -92,6 +92,25 @@ int main() {
     for (const auto &int_val : append_test) {
         output += std::to_string(int_val) + "\n";
     }
+    output += "___\n";
+    stack_vector::stack_vector<int, 10> erase_test = append_test;
+    erase_test.erase(erase_test.begin() + 2, erase_test.begin() + 4);
+    assert(erase_test.size() == append_test.size() - 2 && "erase range test failed!");
+    erase_test.erase(erase_test.begin() + 2);
+    assert(erase_test.size() == append_test.size() - 3 && "erase test failed!");
+    
+    for (const auto &int_val : erase_test) {
+        output += std::to_string(int_val) + "\n";
+    }
+
+    output += "___\n";
+    size_t removed_count = std::erase(erase_test, 1);
+    assert(removed_count == 1 && "std::erase test failed!");
+    assert(erase_test.size() == append_test.size() - 4 && "std::erase test failed!");
+
+    for (const auto &int_val : erase_test) {
+        output += std::to_string(int_val) + "\n";
+    }
 
     std::cout << output;
 

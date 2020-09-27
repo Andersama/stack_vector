@@ -469,6 +469,39 @@ namespace stack_vector {
                     }
                 }
         };
+        // erase's
+        constexpr iterator
+        erase(const_iterator pos) noexcept(::std::is_nothrow_move_assignable_v<value_type>) {
+            size_type erase_idx = pos - cbegin();
+            // move on top
+            iterator first = begin() + erase_idx + 1;
+            iterator last  = end();
+            iterator dest  = begin() + erase_idx;
+            for (; first != last; ++dest, (void)++first) {
+                *dest = ::std::move(*first);
+            }
+            ::stack_vector::details::destroy_at(end() - 1);
+            _size -= 1;
+            return begin() + erase_idx;
+        }
+        constexpr iterator
+        erase(const_iterator first,
+              const_iterator last) noexcept(::std::is_nothrow_move_assignable_v<value_type>) {
+            size_type erase_idx = first - cbegin();
+            if (first != last) {
+                size_type erase_count = last - first;
+                iterator  _first      = begin() + (erase_idx + erase_count);
+                iterator  _last       = end();
+                iterator  dest        = begin() + erase_idx;
+                for (; _first != _last; ++dest, (void)++_first) {
+                    *dest = ::std::move(*_first);
+                }
+                ::stack_vector::details::destroy(end() - erase_count, end());
+                _size -= erase_count;
+            }
+            return begin() + erase_idx;
+        }
+
         // resize's (unimplemented or noop)
         // swap's
         constexpr void swap(stack_vector &other) noexcept {
@@ -525,3 +558,29 @@ template <class T, size_t N0, size_t N1>
                               const stack_vector::stack_vector<T, N1> &right) {
     return !(left < right);
 }
+
+namespace std {
+    // conditional erases
+    template <class T, size_t N, class U>
+    constexpr typename stack_vector::stack_vector<T, N>::size_type erase(stack_vector::stack_vector<T, N> &c,
+                                                                         const U &value) {
+        auto it = ::std::remove(c.begin(), c.end(), value);
+        auto r  = ::std::distance(it, c.end());
+        c.erase(it, c.end());
+        return r;
+    }
+
+    template <class T, size_t N, class Pred>
+    constexpr typename stack_vector::stack_vector<T, N>::size_type
+    erase_if(stack_vector::stack_vector<T, N> &c, Pred pred) {
+        auto it = ::std::remove_if(c.begin(), c.end(), pred);
+        auto r  = ::std::distance(it, c.end());
+        c.erase(it, c.end());
+        return r;
+    };
+
+    template <class T, size_t N>
+    constexpr void swap(::stack_vector::stack_vector<T, N> &left, ::stack_vector::stack_vector<T, N> &right) noexcept {
+        left.swap(right);
+    }
+} // namespace std
