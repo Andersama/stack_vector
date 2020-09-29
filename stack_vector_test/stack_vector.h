@@ -454,6 +454,9 @@ namespace stack_vector {
             const pointer new_end    = old_end + count;
             const T *     value_ptr  = &value;
 
+            assert(pos >= cbegin() && pos <= cend() &&
+                   "insert iterator is out of bounds of the stack_vector");
+
             size_type  insert_idx         = pos - cend();
             size_type  remaining_capacity = capacity() - size();
             const bool one_at_back        = (count == 1) && (insert_ptr == old_end);
