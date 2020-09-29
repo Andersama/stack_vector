@@ -201,7 +201,7 @@ namespace stack_vector {
         };
         // assign's
         constexpr void assign(size_type count, const T &value) {
-            if (count < capacity())
+            if (count <= capacity())
                 [[likely]] {
                     clear();
                     ::stack_vector::details::uninitialized_fill_n(end(), count, value);
