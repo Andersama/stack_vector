@@ -1,10 +1,14 @@
 # stack_vector
-A fixed capacity vector, for dynamic arrays of maximum known size
+A fixed capacity vector, or a variable length array for c++20, for dynamic arrays of maximum known size
 
 Implements most of vector functions except those dealing with resizing.
 
 TODO:
 * Allow some form of error for when inserts / push_backs go beyond the capacity
+
+Notes:
+Size doesn't necessarily need it's own particular address relative to the internal [], technically it may be placed in front or behind the [].
+I chose in front, this may lose in terms of memory size / layout for large types.
 
 Currently eaither noop's or saturates capacity when insertions are too large.
 
