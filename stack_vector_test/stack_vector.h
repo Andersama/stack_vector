@@ -9,8 +9,9 @@
 #include <assert.h>
 
 namespace stack_vector {
+    // for some detail trickery
+    // see: https://github.com/tcbrindle/span/blob/master/include/tcb/span.hpp
     namespace details {
-        // std::array<T, N> store;
         template <typename _Ty> constexpr void destroy_at(_Ty *const ptr) {
             ptr->~_Ty();
         }
@@ -19,17 +20,18 @@ namespace stack_vector {
                 ::stack_vector::details::destroy_at(::std::addressof(*first));
         }
 
-        template <typename It1, typename It2> constexpr void uninitialized_copy(It1 I, It1 E, It2 Dest) {
-            ::std::uninitialized_copy(I, E, Dest);
+        template <typename It1, typename It2> constexpr It1 uninitialized_copy(It1 I, It1 E, It2 Dest) {
+            return ::std::uninitialized_copy(I, E, Dest);
         }
-        template <typename It1, typename It2> constexpr void uninitialized_copy_n(It1 I, size_t C, It2 Dest) {
-            ::std::uninitialized_copy_n(I, C, Dest);
+        template <typename It1, typename It2> constexpr It1 uninitialized_copy_n(It1 I, size_t C, It2 Dest) {
+            return ::std::uninitialized_copy_n(I, C, Dest);
         }
-        template <typename It1, typename It2> constexpr void uninitialized_move(It1 I, It1 E, It2 Dest) {
-            ::std::uninitialized_copy(::std::make_move_iterator(I), ::std::make_move_iterator(E), Dest);
+        template <typename It1, typename It2> constexpr It1 uninitialized_move(It1 I, It1 E, It2 Dest) {
+            return ::std::uninitialized_copy(::std::make_move_iterator(I), ::std::make_move_iterator(E),
+                                             Dest);
         }
-        template <typename It1, typename It2> constexpr void uninitialized_move_n(It1 I, size_t C, It2 Dest) {
-            ::std::uninitialized_copy_n(::std::make_move_iterator(I), C, Dest);
+        template <typename It1, typename It2> constexpr It1 uninitialized_move_n(It1 I, size_t C, It2 Dest) {
+            return ::std::uninitialized_copy_n(::std::make_move_iterator(I), C, Dest);
         }
         template <typename It1, typename Val1> constexpr void uninitialized_fill(It1 I, It1 E, Val1 Dest) {
             ::std::uninitialized_fill(I, E, Dest);
@@ -37,6 +39,9 @@ namespace stack_vector {
         template <typename It1, typename Val1> constexpr void uninitialized_fill_n(It1 I, size_t C, Val1 V) {
             ::std::uninitialized_fill_n(I, C, V);
         }
+
+        enum class error_handling : uint8_t { _noop, _saturate, _exception, _error_code };
+        constexpr const error_handling error_handler = error_handling::_noop;
     }; // namespace details
 
     template <typename T, size_t N> struct stack_vector {
@@ -60,48 +65,110 @@ namespace stack_vector {
         using array_type = ::std::array<T, N>;
         using union_type = ::std::aligned_union<1, array_type>;
         size_type _size  = 0ULL;
-        // Allocate raw space for N elements of type T.  If T has a ctor or dtor, we
-        // don't want it to be automatically run, so we need to represent the space as
-        // something else.  Use an array of char of sufficient alignment.
+        // Avoid construction of T's if T has a constructor
         union {
-            char             a_byte;
+            char             a_byte = 0;
             T                a_t;
             std::array<T, N> store;
         };
 
-        template <class It1> void insert_range(const_iterator pos, It1 first, It1 last) {
-            // insert input range [first, last) at _Where
-            if (first == last) {
-                return; // nothing to do, avoid invalidating iterators
+        template <typename RetType> RetType return_error(RetType ret, [[maybe_unused]] const char *err_msg) {
+            if constexpr (::stack_vector::details::error_handler ==
+                          ::stack_vector::details::error_handling::_noop) {
+                return ret;
+            } else if constexpr (::stack_vector::details::error_handler ==
+                                 ::stack_vector::details::error_handling::_saturate) {
+                return ret;
+            } else if (::stack_vector::details::error_handler ==
+                       ::stack_vector::details::error_handling::_exception) {
+                throw std::bad_alloc(err_msg);
+                return ret;
+            } else if (::stack_vector::details::error_handler ==
+                       ::stack_vector::details::error_handling::_error_code) {
+                if constexpr (std::is_same<RetType, iterator>::value) {
+                    return ++ret;
+                } else if (std::is_same<RetType, bool>::value) {
+                    return false;
+                }
+            } else {
+                return ret;
             }
+        };
 
-            pointer         old_begin  = &store[0];
-            pointer         oldlast    = &store[0] + size();
-            const size_type insert_idx = pos - cbegin();
-            const size_type old_size   = size();
-            // For one-at-back, provide strong guarantee.
-            // Otherwise, provide basic guarantee (despite N4659 26.3.11.5 [vector.modifiers]/1).
-            // Performance note: except for one-at-back, emplace_back()'s strong guarantee is unnecessary
-            // here.
+        template <class It1> constexpr iterator insert_range(const_iterator pos, It1 first, It1 last) {
+            // insert input range [first, last) at _Where
+            size_type insert_idx = pos - cbegin();
+            iterator  ret_it     = begin() + insert_idx;
+            if (first == last) {
+                return ret_it;
+            }
+            assert(pos >= cbegin() && pos <= cend() &&
+                   "insert iterator is out of bounds of the stack_vector");
+            const size_type old_size = size();
 
-            for (; first != last && size() < capacity(); ++first) {
-                unchecked_emplace_back(*first); // emplace_back(*first);
+            if constexpr (::std::is_same<::std::random_access_iterator_tag,
+                                         ::std::iterator_traits<It1>::iterator_category>::value) {
+                size_type insert_count = last - first;
+                if (insert_count > (capacity() - size())) { // error? or noop
+                    if constexpr (::stack_vector::details::error_handler !=
+                                  ::stack_vector::details::error_handling::_noop) {
+                        return ret_it = return_error(ret_it, "stack_vector cannot allocate space to insert");
+                    }
+                }
+                // already safe from check above*
+                ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
+                _size += insert_count;
+            } else {
+                // bounds check each emplace_back, saturating
+                for (; first != last && size() < capacity(); ++first) {
+                    unchecked_emplace_back(*first);
+                }
+
+                if constexpr (::stack_vector::details::error_handler !=
+                              ::stack_vector::details::error_handling::_noop) {
+                    if (first != last) {
+                        return ret_it = return_error(ret_it, "stack_vector cannot allocate space to insert");
+                    }
+                }
             }
 
             ::std::rotate(begin() + insert_idx, begin() + old_size, end());
+            return ret_it;
         }
 
-        template <class It1> void append_range(It1 first, It1 last) {
+        template <class It1> constexpr iterator append_range(It1 first, It1 last) {
+            // insert input range [first, last) at _Where
+            iterator ret_it = end();
             if (first == last) {
-                return; // nothing to do, avoid invalidating iterators
+                return ret_it;
             }
-            // For one-at-back, provide strong guarantee.
-            // Otherwise, provide basic guarantee (despite N4659 26.3.11.5 [vector.modifiers]/1).
-            // Performance note: except for one-at-back, emplace_back()'s strong guarantee is unnecessary
-            // here.
-            for (; first != last && size() < capacity(); ++first) {
-                unchecked_emplace_back(*first); // emplace_back(*first);
+
+            if constexpr (::std::is_same<::std::random_access_iterator_tag,
+                                         ::std::iterator_traits<It1>::iterator_category>::value) {
+                size_type insert_count = last - first;
+                if (insert_count > (capacity() - size())) { // error? or noop
+                    if constexpr (::stack_vector::details::error_handler !=
+                                  ::stack_vector::details::error_handling::_noop) {
+                        return ret_it = return_error(ret_it, "stack_vector cannot allocate space to insert");
+                    }
+                }
+                // already safe from check above*
+                ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
+                _size += insert_count;
+            } else {
+                // bounds check each emplace_back, saturating
+                for (; first != last && size() < capacity(); ++first) {
+                    unchecked_emplace_back(*first);
+                }
+                if constexpr (::stack_vector::details::error_handler !=
+                              ::stack_vector::details::error_handling::_noop) {
+                    if (first != last) {
+                        return ret_it = return_error(ret_it, "stack_vector cannot allocate space to insert");
+                    }
+                }
             }
+
+            return ret_it;
         }
 
       public:
@@ -131,9 +198,8 @@ namespace stack_vector {
             assign(init);
         };
         template <size_t N0> constexpr stack_vector(std::array<T, N0> arr) noexcept {
-            if (!arr.empty()) {
+            if (!arr.empty())
                 assign(arr.begin(), arr.end());
-            }
         }
 
         // destructor
@@ -207,13 +273,38 @@ namespace stack_vector {
                     ::stack_vector::details::uninitialized_fill_n(end(), count, value);
                     _size = count;
                 }
+            else {
+                if constexpr (::stack_vector::details::error_handler !=
+                              ::stack_vector::details::error_handling::_noop) {
+                    return_error(false, "stack_vector cannot allocate space to insert");
+                }
+            }
         };
         template <class It1> constexpr void assign(It1 first, It1 last) {
-            size_t insert_count = ::std::distance(first, last);
-            if ((size() + insert_count) <= capacity()) {
+            if constexpr (::std::is_same<::std::random_access_iterator_tag,
+                                         ::std::iterator_traits<It1>::iterator_category>::value) {
+                size_type insert_count = last - first;
+                if ((size() + insert_count) <= capacity()) {
+                    clear();
+                    ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
+                    _size = insert_count;
+                } else {
+                    if constexpr (::stack_vector::details::error_handler !=
+                                  ::stack_vector::details::error_handling::_noop) {
+                        return_error(false, "stack_vector cannot allocate space to insert");
+                    }
+                }
+            } else {
                 clear();
-                ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
-                _size = insert_count;
+                for (; first != last && size() < capacity(); ++first) {
+                    unchecked_emplace_back(*first);
+                }
+                if constexpr (::stack_vector::details::error_handler !=
+                              ::stack_vector::details::error_handling::_exception) {
+                    if (first != last) {
+                        return_error(ret_it, "stack_vector cannot allocate space to insert");
+                    }
+                }
             }
         };
         constexpr void assign(::std::initializer_list<T> ilist) {
@@ -222,22 +313,20 @@ namespace stack_vector {
         // append's (non-standard)
         void append(size_type count, const T &value) {
             size_t space_remaining = capacity() - size();
-            if (count <= space_remaining) {
-                ::stack_vector::details::uninitialized_fill_n(end(), count, value);
-                _size += count;
+            if (count && count <= space_remaining)
+                [[likely]] {
+                    ::stack_vector::details::uninitialized_fill_n(end(), count, value);
+                    _size += count;
+                }
+            else {
+                if constexpr (::stack_vector::details::error_handler !=
+                              ::stack_vector::details::error_handling::_noop) {
+                    return_error(false, "stack_vector cannot allocate space to insert");
+                }
             }
         }
         template <typename It1> void append(It1 first, It1 last) {
-            if constexpr (::std::is_same<::std::random_access_iterator_tag,
-                                         ::std::iterator_traits<It1>::iterator_category>::value) {
-                size_t insert_count = ::std::distance(first, last);
-                if ((size() + insert_count) <= capacity()) {
-                    ::stack_vector::details::uninitialized_copy(first, last, end());
-                    _size += insert_count;
-                }
-            } else {
-                append_range(first, last);
-            }
+            append_range(first, last);
         }
 
         // at's
@@ -265,7 +354,7 @@ namespace stack_vector {
             assert(!empty());
             return store[0];
         };
-        // back
+        // back's
         [[nodiscard]] constexpr reference back() {
             assert(!empty());
             return store[_size - 1];
@@ -274,7 +363,7 @@ namespace stack_vector {
             assert(!empty());
             return store[_size - 1];
         };
-        // data
+        // data's
         [[nodiscard]] constexpr T *data() noexcept {
             return store.data();
         };
@@ -321,7 +410,7 @@ namespace stack_vector {
         [[nodiscard]] constexpr const_reverse_iterator crend() const noexcept {
             return const_reverse_iterator(begin());
         };
-        // empty
+        // empty's
         [[nodiscard]] constexpr bool empty() const noexcept {
             return size() == 0;
         };
@@ -333,11 +422,11 @@ namespace stack_vector {
         constexpr size_type size() const noexcept {
             return _size;
         };
-        // capacity (bit of a lie, we forward to array's size)
+        // capacity (constant)
         constexpr size_type capacity() const noexcept {
             return N;
         };
-        // max_size (bit of a lie, we forward to array's size)
+        // max_size (constant)
         constexpr size_type max_size() const noexcept {
             return N;
         };
@@ -345,12 +434,10 @@ namespace stack_vector {
         // shrink_to_fit (unimplemented or noop)
         // ::std::uninitialized_fill(this->begin(), this->end(), Elt);
         constexpr void clear() noexcept {
-            if constexpr (::std::is_pod<element_type>::value) {
-                _size = 0ULL;
-            } else {
+            if constexpr (!::std::is_trivially_destructible<element_type>::value) {
                 ::stack_vector::details::destroy(begin(), end());
-                _size = 0ULL;
             }
+            _size = 0ULL;
         };
         // insert's TODO!
         // be sure to verify range
@@ -372,6 +459,22 @@ namespace stack_vector {
             const bool one_at_back        = (count == 1) && (insert_ptr == old_end);
             if (count == 0) {                        // do nothing
             } else if (count > remaining_capacity) { // error?
+                if constexpr (::stack_vector::details::error_handler ==
+                              ::stack_vector::details::error_handling::_exception) {
+                    throw std::bad_alloc("stack_vector cannot allocate to insert elements");
+                } else if (::stack_vector::details::error_handler ==
+                           ::stack_vector::details::error_handling::_error_code) {
+                    return iterator(insert_ptr + 1);
+                } else if (::stack_vector::details::error_handler ==
+                           ::stack_vector::details::error_handling::_noop) {
+                    return iterator(insert_ptr);
+                } else if (::stack_vector::details::error_handler ==
+                           ::stack_vector::details::error_handling::_saturate) {
+                    T tmp = value;
+                    std::move_backward(insert_ptr, old_end, old_end + remaining_capacity);
+                    ::stack_vector::details::uninitialized_fill_n(pos, remaining_capacity, tmp);
+                    _size += count;
+                }
             } else if (one_at_back) {
                 unchecked_emplace_back(value);
             } else {
@@ -383,9 +486,7 @@ namespace stack_vector {
             return iterator(insert_ptr);
         };
         template <class InputIt> constexpr iterator insert(const_iterator pos, InputIt first, InputIt last) {
-            size_type insert_idx = pos - cbegin();
-            insert_range(pos, first, last);
-            return begin() + insert_idx;
+            return insert_range(pos, first, last);
         };
         constexpr iterator insert(const_iterator pos, ::std::initializer_list<T> ilist) {
             return insert(pos, ilist.begin(), ilist.end());
@@ -393,14 +494,25 @@ namespace stack_vector {
         // emplace's
         template <class... Args> constexpr iterator emplace(const_iterator pos, Args &&... args) {
             size_type insert_idx = pos - cbegin();
-            iterator  ret_idx    = begin() + insert_idx;
+            iterator  ret_it     = begin() + insert_idx;
             if (pos == cend()) { // special case for empty vector
-                if (!full()) {
-                    ::new ((void *)ret_idx) T(::std::forward<Args>(args)...);
-                    _size += 1;
-                    return ret_idx;
-                } else { // error?
-                    return ret_idx;
+                if (!full())
+                    [[likely]] {
+                        ::new ((void *)ret_it) T(::std::forward<Args>(args)...);
+                        _size += 1;
+                        return ret_it;
+                    }
+                else { // error?
+                    if constexpr (::stack_vector::details::error_handler ==
+                                  ::stack_vector::details::error_handling::_exception) {
+                        throw std::bad_alloc("stack_vector cannot allocate to insert elements");
+                        return ret_it;
+                    } else if (::stack_vector::details::error_handler ==
+                               ::stack_vector::details::error_handling::_error_code) {
+                        return ++ret_it;
+                    } else {
+                        return ret_it;
+                    }
                 }
             }
 
@@ -408,20 +520,29 @@ namespace stack_vector {
             assert(pos <= cend() && "inserting past the end of the stack_vector.");
             // if full we back out
             if (full()) {
-                return ret_idx = end();
+                if constexpr (::stack_vector::details::error_handler ==
+                              ::stack_vector::details::error_handling::_exception) {
+                    throw std::bad_alloc("stack_vector cannot allocate to insert elements");
+                    return ret_it;
+                } else if (::stack_vector::details::error_handler ==
+                           ::stack_vector::details::error_handling::_error_code) {
+                    return ++ret_it;
+                } else {
+                    return ret_it;
+                }
             }
             T tmp = T(::std::forward<Args>(args)...);
-            // placement new back item, eg... ...insert here, a, b, c, end -> ...insert here, a, a, b, c,
-            // (end)
+            // placement new back item, eg... ...insert here, a, b, c, end -> ...insert
+            // here, a, a, b, c, (end)
             ::new ((void *)end()) T(::std::move(back()));
             // first last, destination
             ::std::move_backward(begin() + insert_idx, end() - 1, end());
             // up the size
             _size += 1;
             // insert the value
-            *ret_idx = ::std::move(tmp);
+            *ret_it = ::std::move(tmp);
 
-            return ret_idx;
+            return ret_it;
         };
 
         // push_back's
@@ -448,6 +569,12 @@ namespace stack_vector {
                     ::new ((void *)it) T(::std::forward<Args>(args)...);
                     _size += 1;
                 }
+            else { // error?
+                if constexpr (::stack_vector::details::error_handler ==
+                              ::stack_vector::details::error_handling::_exception) {
+                    throw std::bad_alloc("stack_vector cannot allocate to insert elements");
+                }
+            }
             return *it;
         };
         template <class... Args> constexpr reference unchecked_emplace_back(Args &&... args) {
@@ -461,18 +588,26 @@ namespace stack_vector {
         constexpr void pop_back() {
             if (size())
                 [[likely]] {
-                    if constexpr (::std::is_pod<element_type>::value) {
+                    if constexpr (::std::is_trivially_destructible<element_type>::value) {
                         _size -= 1;
                     } else {
                         _size -= 1;
                         end()->~T(); // destroy the tailing value
                     }
                 }
+            else { // error?
+                if constexpr (::stack_vector::details::error_handler ==
+                              ::stack_vector::details::error_handling::_exception) {
+                    throw std::domain_error("stack_vector cannot pop_back when empty");
+                }
+            }
         };
         // erase's
         constexpr iterator
         erase(const_iterator pos) noexcept(::std::is_nothrow_move_assignable_v<value_type>) {
             size_type erase_idx = pos - cbegin();
+
+            assert(pos >= cbegin() && pos <= cend() && "erase iterator is out of bounds of the stack_vector");
             // move on top
             iterator first = begin() + erase_idx + 1;
             iterator last  = end();
@@ -488,6 +623,12 @@ namespace stack_vector {
         erase(const_iterator first,
               const_iterator last) noexcept(::std::is_nothrow_move_assignable_v<value_type>) {
             size_type erase_idx = first - cbegin();
+
+            assert(first >= cbegin() && first <= cend() &&
+                   "first erase iterator is out of bounds of the stack_vector");
+            assert(last >= cbegin() && last <= cend() &&
+                   "last erase iterator is out of bounds of the stack_vector");
+
             if (first != last) {
                 size_type erase_count = last - first;
                 iterator  _first      = begin() + (erase_idx + erase_count);
@@ -580,7 +721,8 @@ namespace std {
     };
 
     template <class T, size_t N>
-    constexpr void swap(::stack_vector::stack_vector<T, N> &left, ::stack_vector::stack_vector<T, N> &right) noexcept {
+    constexpr void swap(::stack_vector::stack_vector<T, N> &left,
+                        ::stack_vector::stack_vector<T, N> &right) noexcept {
         left.swap(right);
     }
-} // namespace std
+}; // namespace std
