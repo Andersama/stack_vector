@@ -204,7 +204,7 @@ namespace stack_vector {
 
         // destructor
         ~stack_vector() {
-            if constexpr (!::std::is_pod<element_type>::value)
+            if constexpr (!::std::is_trivially_destructible<element_type>::value)
                 ::stack_vector::details::destroy(begin(), end());
         }
         // operator ='s
