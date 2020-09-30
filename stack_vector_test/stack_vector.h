@@ -270,7 +270,7 @@ namespace stack_vector {
             if (count <= capacity())
                 [[likely]] {
                     clear();
-                    ::stack_vector::details::uninitialized_fill_n(end(), count, value);
+                    ::stack_vector::details::uninitialized_fill_n(begin(), count, value);
                     _size = count;
                 }
             else {
