@@ -5,7 +5,7 @@
 #include <string>
 
 int main() {
-    std::string           output = "";
+    std::string                        output = "";
     stack_vector::stack_vector<int, 5> test;
     test.emplace_back(0);
     stack_vector::stack_vector<int, 5> test_1;
@@ -26,7 +26,7 @@ int main() {
         assert(test[i] == i && "iterator value != assigned value!");
     }
     assert(test.size() == test.capacity() && "size != capacity");
-        
+
     for (const auto &int_val : test) {
         output += std::to_string(int_val) + "\n";
     }
@@ -73,7 +73,7 @@ int main() {
     for (const auto &int_val : test_1) {
         output += std::to_string(int_val) + "\n";
     }
-    
+
     output += "___\n";
 
     stack_vector::stack_vector<int, 10> append_test;
@@ -98,7 +98,7 @@ int main() {
     assert(erase_test.size() == append_test.size() - 2 && "erase range test failed!");
     erase_test.erase(erase_test.begin() + 2);
     assert(erase_test.size() == append_test.size() - 3 && "erase test failed!");
-    
+
     for (const auto &int_val : erase_test) {
         output += std::to_string(int_val) + "\n";
     }
@@ -109,6 +109,28 @@ int main() {
     assert(erase_test.size() == append_test.size() - 4 && "std::erase test failed!");
 
     for (const auto &int_val : erase_test) {
+        output += std::to_string(int_val) + "\n";
+    }
+
+    output += "___\n";
+
+    auto append_test_1 = ::stack_vector::append(append_test, erase_test);
+    assert(append_test_1.size() == (append_test.size() + erase_test.size()) &&
+           "top level append size check failed!");
+    assert(append_test_1.capacity() == (append_test.capacity() + erase_test.capacity()) &&
+           "top level append capacity check failed!");
+
+    m = 0;
+    for (size_t i = 0; i < append_test.size(); i++) {
+        assert(append_test_1[m] == append_test[i] && "iterator value != ptr value");
+        m++;
+    }
+    for (size_t i = 0; i < erase_test.size(); i++) {
+        assert(append_test_1[m] == erase_test[i] && "iterator value != ptr value");
+        m++;
+    }
+
+    for (const auto &int_val : append_test_1) {
         output += std::to_string(int_val) + "\n";
     }
 

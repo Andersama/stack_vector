@@ -3,7 +3,7 @@
 #
 cmake_minimum_required (VERSION 3.8)
 
-project ("stack_vector_test")
+project ("stack_vector")
 
 # Include sub-projects.
-add_subdirectory ("stack_vector_test")
+add_subdirectory ("stack_vector")

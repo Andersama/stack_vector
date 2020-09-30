@@ -72,7 +72,8 @@ namespace stack_vector {
             std::array<T, N> store;
         };
 
-        template <typename RetType> RetType return_error(RetType ret, [[maybe_unused]] const char *err_msg) {
+        template <typename RetType>
+        __forceinline RetType return_error(RetType ret, [[maybe_unused]] const char *err_msg) {
             if constexpr (::stack_vector::details::error_handler ==
                           ::stack_vector::details::error_handling::_noop) {
                 return ret;
@@ -664,6 +665,14 @@ namespace stack_vector {
             ::std::swap(_size, other._size);
         }
     };
+    template <class T, size_t N0, size_t N1>
+    [[nodiscard]] ::stack_vector::stack_vector<T, N0 + N1> __forceinline append(
+        const ::stack_vector::stack_vector<T, N0> &left, const ::stack_vector::stack_vector<T, N1> &right) {
+        ::stack_vector::stack_vector<T, N0 + N1> ret;
+        ret.append(left.begin(), left.end());
+        ret.append(right.begin(), right.end());
+        return ret;
+    }
 } // namespace stack_vector
 
 // non-members
