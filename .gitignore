@@ -34,3 +34,6 @@
 #
 .vs/
 out/
+
+# Json Files
+*.json
