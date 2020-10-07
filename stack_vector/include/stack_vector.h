@@ -78,7 +78,7 @@ namespace stack_vector {
                           ::stack_vector::details::error_handling::_noop) {
                 return ret;
             } else if (::stack_vector::details::error_handler ==
-                                 ::stack_vector::details::error_handling::_saturate) {
+                       ::stack_vector::details::error_handling::_saturate) {
                 return ret;
             } else if (::stack_vector::details::error_handler ==
                        ::stack_vector::details::error_handling::_exception) {
@@ -301,9 +301,9 @@ namespace stack_vector {
                     unchecked_emplace_back(*first);
                 }
                 if constexpr (::stack_vector::details::error_handler !=
-                              ::stack_vector::details::error_handling::_exception) {
+                              ::stack_vector::details::error_handling::_noop) {
                     if (first != last) {
-                        return_error(ret_it, "stack_vector cannot allocate space to insert");
+                        return_error(false, "stack_vector cannot allocate space to insert");
                     }
                 }
             }
@@ -507,16 +507,7 @@ namespace stack_vector {
                         return ret_it;
                     }
                 else { // error?
-                    if constexpr (::stack_vector::details::error_handler ==
-                                  ::stack_vector::details::error_handling::_exception) {
-                        throw std::bad_alloc("stack_vector cannot allocate to insert elements");
-                        return ret_it;
-                    } else if (::stack_vector::details::error_handler ==
-                               ::stack_vector::details::error_handling::_error_code) {
-                        return ++ret_it;
-                    } else {
-                        return ret_it;
-                    }
+                    return ret_it = return_error(ret_it, "stack_vector cannot allocate to insert elements");
                 }
             }
 
@@ -524,16 +515,7 @@ namespace stack_vector {
             assert(pos <= cend() && "inserting past the end of the stack_vector.");
             // if full we back out
             if (full()) {
-                if constexpr (::stack_vector::details::error_handler ==
-                              ::stack_vector::details::error_handling::_exception) {
-                    throw std::bad_alloc("stack_vector cannot allocate to insert elements");
-                    return ret_it;
-                } else if (::stack_vector::details::error_handler ==
-                           ::stack_vector::details::error_handling::_error_code) {
-                    return ++ret_it;
-                } else {
-                    return ret_it;
-                }
+                return ret_it = return_error(ret_it, "stack_vector cannot allocate to insert elements");
             }
             T tmp = T(::std::forward<Args>(args)...);
             // placement new back item, eg... ...insert here, a, b, c, end -> ...insert
