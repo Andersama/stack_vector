@@ -77,7 +77,7 @@ namespace stack_vector {
             if constexpr (::stack_vector::details::error_handler ==
                           ::stack_vector::details::error_handling::_noop) {
                 return ret;
-            } else if constexpr (::stack_vector::details::error_handler ==
+            } else if (::stack_vector::details::error_handler ==
                                  ::stack_vector::details::error_handling::_saturate) {
                 return ret;
             } else if (::stack_vector::details::error_handler ==
