@@ -5,6 +5,7 @@
 #include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 
 #include <assert.h>
 
@@ -44,34 +45,77 @@ namespace stack_vector {
         constexpr const error_handling error_handler = error_handling::_noop;
     }; // namespace details
 
-    template <typename T, size_t N> struct stack_vector {
+    template <typename T> struct alignas(alignof(T)) non_trivial_struct {
+        constexpr non_trivial_struct() noexcept {};
+        constexpr T *as_ptr() noexcept {
+            return reinterpret_cast<T *>(this);
+        }
+        constexpr const T *as_ptr() const noexcept {
+            return reinterpret_cast<const T *>(this);
+        }
+    };
+
+    template <typename T, size_t N, bool = ::std::is_trivially_destructible<T>::value>
+    struct stack_vector_destruct_base {
+        using value_type = typename ::std::remove_const_t<T>;
+        union {
+            non_trivial_struct<value_type> _dummy;
+            ::std::array<value_type, N>    _buf;
+        };
+        uint32_t _size;
+        uint32_t _using_buf;
+        constexpr stack_vector_destruct_base() noexcept : _dummy{}, _size{0}, _using_buf{0} {};
+    };
+
+    template <typename T, size_t N> struct stack_vector_destruct_base<T, N, false> {
+        using value_type = ::std::remove_const_t<T>;
+        union {
+            non_trivial_struct<value_type> _dummy;
+            ::std::array<value_type, N>    _buf;
+        };
+        uint32_t _size;
+        uint32_t _using_buf;
+        constexpr stack_vector_destruct_base() noexcept : _dummy{}, _size{0}, _using_buf{0} {};
+        ~stack_vector_destruct_base() noexcept {
+            if constexpr (::std::is_constant_evaluated()) {
+                // we have to keep track of which union member we're dealing w/ (b/c otherwise the compiler
+                // complains) :(
+                if (_using_buf) {
+                    for (size_t i = 0; i < this->_size; i++)
+                        _buf[i].~value_type();
+                    _dummy = _dummy();
+                }
+            } else {
+                for (size_t i = 0; i < this->_size; i++)
+                    _buf[i].~value_type();
+            }
+        }
+    };
+
+    template <class T, size_t N> struct stack_vector_construct_base : stack_vector_destruct_base<T, N> {
+        using stack_vector_destruct_base<T, N>::stack_vector_destruct_base;
+    };
+
+    template <typename T, size_t N> struct stack_vector : private stack_vector_construct_base<T, N> {
         static_assert(N > 0, "a stack_vector<T,N> must have an N > 0");
 
       public:
-        using element_type           = T;
-        using value_type             = typename ::std::remove_cv<T>::type;
+        using destruct_base          = stack_vector_destruct_base<T, N>;
+        using construct_base         = stack_vector_construct_base<T, N>;
+        using value_type             = typename stack_vector_destruct_base<T, N>::value_type;
+        using array_type             = ::std::array<value_type, N>;
         using const_reference        = const value_type &;
         using size_type              = ::std::size_t;
         using difference_type        = ::std::ptrdiff_t;
-        using pointer                = element_type *;
-        using const_pointer          = const element_type *;
-        using reference              = element_type &;
+        using pointer                = value_type *;
+        using const_pointer          = const value_type *;
+        using reference              = value_type &;
         using iterator               = pointer;
         using const_iterator         = const_pointer;
         using reverse_iterator       = ::std::reverse_iterator<iterator>;
         using const_reverse_iterator = ::std::reverse_iterator<const_iterator>;
 
       private:
-        using array_type = ::std::array<T, N>;
-        using union_type = ::std::aligned_union<1, array_type>;
-        size_type _size  = 0ULL;
-        // Avoid construction of T's if T has a constructor
-        union {
-            char             a_byte = 0;
-            T                a_t;
-            std::array<T, N> store;
-        };
-
         template <typename RetType>
         __forceinline RetType return_error(RetType ret, [[maybe_unused]] const char *err_msg) {
             if constexpr (::stack_vector::details::error_handler ==
@@ -118,7 +162,7 @@ namespace stack_vector {
                 }
                 // already safe from check above*
                 ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
-                _size += insert_count;
+                this->_size += insert_count;
             } else {
                 // bounds check each emplace_back, saturating
                 for (; first != last && size() < capacity(); ++first) {
@@ -155,7 +199,7 @@ namespace stack_vector {
                 }
                 // already safe from check above*
                 ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
-                _size += insert_count;
+                this->_size += insert_count;
             } else {
                 // bounds check each emplace_back, saturating
                 for (; first != last && size() < capacity(); ++first) {
@@ -195,70 +239,98 @@ namespace stack_vector {
             if (!other.empty())
                 this->operator=(::std::move(other));
         };
-        constexpr stack_vector(::std::initializer_list<T> init) {
+        constexpr stack_vector(::std::initializer_list<value_type> init) {
             assign(init);
         };
-        template <size_t N0> constexpr stack_vector(std::array<T, N0> arr) noexcept {
-            if (!arr.empty())
-                assign(arr.begin(), arr.end());
+        template <size_t N0> constexpr stack_vector(std::array<value_type, N0> arr) noexcept {
+            assign(arr.begin(), arr.end());
         }
-
+        /*
         // destructor
         ~stack_vector() {
             if constexpr (!::std::is_trivially_destructible<element_type>::value)
                 ::stack_vector::details::destroy(begin(), end());
         }
+        */
         // operator ='s
         constexpr stack_vector &operator=(const stack_vector &other) {
             if (this == &other)
                 return *this;
             size_t rhs_size = other.size();
             size_t lhs_size = size();
-            if (lhs_size >= rhs_size) {
-                iterator new_end;
-                if (rhs_size)
-                    new_end = ::std::copy(other.begin(), other.begin() + rhs_size, begin());
-                else // no copy, setup to clear
-                    new_end = begin();
-                // destroy excess elements
-                ::stack_vector::details::destroy(new_end, end());
-                _size = rhs_size;
-                return *this;
+            if (::std::is_constant_evaluated()) {
+                // we have to keep track of which union member we're dealing w/ (b/c otherwise the compiler
+                // complains) :(
+                if (other._using_buf) {
+                    if (this->_using_buf) {
+                        ::std::copy(other.begin(), other.begin() + rhs_size, begin());
+                        this->_size = rhs_size;
+                    } else {
+                        if (rhs_size) {
+                            this->_buf[0]    = *other.begin();
+                            this->_using_buf = 1;
+                            ::std::copy(other.begin() + 1, other.begin() + rhs_size, begin());
+                            this->_size = rhs_size;
+                            //::std::copy(other.begin(), other.begin() + rhs_size, begin());
+                            // this->this->_size = rhs_size;
+                        } else {
+                            clear();
+                        }
+                    }
+                } else {
+                    // copying uninitialized vector...clear
+                    clear();
+                }
             } else {
-                // copy to initialized memory
-                ::std::copy(other.begin(), other.begin() + lhs_size, begin());
-                // copy to uninitialized memory
-                ::stack_vector::details::uninitialized_copy(other.begin() + lhs_size,
-                                                            other.begin() + rhs_size, begin() + lhs_size);
-                _size = rhs_size;
-                return *this;
+                if (lhs_size >= rhs_size) {
+                    iterator new_end;
+                    if (rhs_size)
+                        new_end = ::std::copy(other.begin(), other.begin() + rhs_size, begin());
+                    else // no copy, setup to clear
+                        new_end = begin();
+                    // destroy excess elements
+                    ::stack_vector::details::destroy(new_end, end());
+                    this->_size = rhs_size;
+                    return *this;
+                } else {
+                    // copy to initialized memory
+                    ::std::copy(other.begin(), other.begin() + lhs_size, begin());
+                    // copy to uninitialized memory
+                    ::stack_vector::details::uninitialized_copy(other.begin() + lhs_size,
+                                                                other.begin() + rhs_size, begin() + lhs_size);
+                    this->_size = rhs_size;
+                    return *this;
+                }
             }
         };
         constexpr stack_vector &operator=(stack_vector &&other) noexcept {
+            if (this == &other)
+                return *this;
             size_t rhs_size = other.size();
             size_t lhs_size = size();
-            if (this == &other) {
-                // do nothing
-            } else if (lhs_size >= rhs_size) {
-                // assign
-                iterator new_end;
-                if (rhs_size)
-                    new_end = ::std::move(other.begin(), other.begin() + rhs_size, begin());
-                else // no copy, setup to clear
-                    new_end = begin();
-                // destroy excess elements
-                ::stack_vector::details::destroy(new_end, end());
-                _size = rhs_size;
-                // clear other
-                other.clear();
+            if (::std::is_constant_evaluated()) {
             } else {
-                // copy to initialized memory
-                ::std::move(other.begin(), other.begin() + lhs_size, begin());
-                // copy to uninitialized memory
-                ::stack_vector::details::uninitialized_move(other.begin() + lhs_size,
-                                                            other.begin() + rhs_size, begin() + lhs_size);
-                _size = rhs_size;
-                other.clear();
+                if (lhs_size >= rhs_size) {
+                    // assign
+                    iterator new_end;
+                    if (rhs_size)
+                        new_end = ::std::move(other.begin(), other.begin() + rhs_size, begin());
+                    else // no copy, setup to clear
+                        new_end = begin();
+                    // destroy excess elements
+                    ::stack_vector::details::destroy(new_end, end());
+                    this->_size = rhs_size;
+                    // clear other
+                    other.clear();
+                } else {
+                    // copy to initialized memory
+                    ::std::move(other.begin(), other.begin() + lhs_size, begin());
+                    // copy to uninitialized memory
+                    ::stack_vector::details::uninitialized_move(other.begin() + lhs_size,
+                                                                other.begin() + rhs_size, begin() + lhs_size);
+                    this->_size = rhs_size;
+                    other.clear();
+                }
             }
             return *this;
         };
@@ -272,7 +344,7 @@ namespace stack_vector {
                 [[likely]] {
                     clear();
                     ::stack_vector::details::uninitialized_fill_n(begin(), count, value);
-                    _size = count;
+                    this->_size = count;
                 }
             else {
                 if constexpr (::stack_vector::details::error_handler !=
@@ -285,10 +357,22 @@ namespace stack_vector {
             if constexpr (::std::is_same<::std::random_access_iterator_tag,
                                          ::std::iterator_traits<It1>::iterator_category>::value) {
                 size_type insert_count = last - first;
-                if ((size() + insert_count) <= capacity()) {
+                if (insert_count <= capacity()) {
                     clear();
-                    ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
-                    _size = insert_count;
+                    if (::std::is_constant_evaluated()) {
+                        if (this->_using_buf) {
+                            for (size_t i = 0; i < insert_count; i++) {
+                                unchecked_emplace_back(*first++);
+                            }
+                        } else {
+                            for (size_t i = 0; i < insert_count; i++) {
+                                unchecked_emplace_back(*first++);
+                            }
+                        }
+                    } else {
+                        ::stack_vector::details::uninitialized_copy_n(first, insert_count, end());
+                        this->_size = insert_count;
+                    }
                 } else {
                     if constexpr (::stack_vector::details::error_handler !=
                                   ::stack_vector::details::error_handling::_noop) {
@@ -317,7 +401,7 @@ namespace stack_vector {
             if (count && count <= space_remaining)
                 [[likely]] {
                     ::stack_vector::details::uninitialized_fill_n(end(), count, value);
-                    _size += count;
+                    this->_size += count;
                 }
             else {
                 if constexpr (::stack_vector::details::error_handler !=
@@ -332,54 +416,137 @@ namespace stack_vector {
 
         // at's
         [[nodiscard]] constexpr reference at(size_type pos) {
-            return store.at(pos);
+            if (pos < size())
+                return this->_buf[pos];
+            else
+                throw ::std::out_of_range();
         };
         [[nodiscard]] constexpr const_reference at(size_type pos) const {
-            return store.at(pos);
+            if (pos < size())
+                return this->_buf[pos];
+            else
+                throw ::std::out_of_range();
         };
         //[]'s
         [[nodiscard]] constexpr reference operator[](size_type pos) {
             assert(pos < size());
-            return store[pos];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return this->_buf[pos];
+                else
+                    return *(this->_dummy.as_ptr() + (pos));
+            } else {
+                return this->_buf[pos];
+            }
         };
         [[nodiscard]] constexpr const_reference operator[](size_type pos) const {
             assert(pos < size());
-            return store[pos];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return this->_buf[pos];
+                else
+                    return *(this->_dummy.as_ptr() + (pos));
+            } else {
+                return this->_buf[pos];
+            }
         };
         // front
         [[nodiscard]] constexpr reference front() {
             assert(!empty());
-            return store[0];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return this->_buf[0];
+                else
+                    return *(this->_dummy.as_ptr());
+            } else {
+                return this->_buf[0];
+            }
         };
         [[nodiscard]] constexpr const_reference front() const {
             assert(!empty());
-            return store[0];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return this->_buf[0];
+                else
+                    return *(this->_dummy.as_ptr());
+            } else {
+                return this->_buf[0];
+            }
         };
         // back's
         [[nodiscard]] constexpr reference back() {
             assert(!empty());
-            return store[_size - 1];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return this->_buf[this->_size - 1];
+                else
+                    return *(this->_dummy.as_ptr() + (this->_size - 1));
+            } else {
+                return this->_buf[this->_size - 1];
+            }
         };
         [[nodiscard]] constexpr const_reference back() const {
             assert(!empty());
-            return store[_size - 1];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return this->_buf[this->_size - 1];
+                else
+                    return *(this->_dummy.as_ptr() + (this->_size - 1));
+            } else {
+                return this->_buf[this->_size - 1];
+            }
         };
         // data's
         [[nodiscard]] constexpr T *data() noexcept {
-            return store.data();
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return &(this->_buf[0]);
+                else
+                    return (this->_dummy.as_ptr());
+            } else {
+                return &(this->_buf[0]);
+            }
         };
         [[nodiscard]] constexpr const T *data() const noexcept {
-            return store.data();
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return &(this->_buf[0]);
+                else
+                    return (this->_dummy.as_ptr());
+            } else {
+                return &(this->_buf[0]);
+            }
         };
         // begin's
         [[nodiscard]] constexpr iterator begin() noexcept {
-            return &store[0];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return &(this->_buf[0]);
+                else
+                    return this->_dummy.as_ptr();
+            } else {
+                return &(this->_buf[0]);
+            }
         };
         [[nodiscard]] constexpr const_iterator begin() const noexcept {
-            return &store[0];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return &(this->_buf[0]);
+                else
+                    return this->_dummy.as_ptr();
+            } else {
+                return &(this->_buf[0]);
+            }
         };
         [[nodiscard]] constexpr const_iterator cbegin() const noexcept {
-            return &store[0];
+            if (::std::is_constant_evaluated()) {
+                if (this->_using_buf)
+                    return &(this->_buf[0]);
+                else
+                    return this->_dummy.as_ptr();
+            } else {
+                return &(this->_buf[0]);
+            }
         };
         // rbegin's
         [[nodiscard]] constexpr reverse_iterator rbegin() noexcept {
@@ -393,13 +560,13 @@ namespace stack_vector {
         };
         // end's
         [[nodiscard]] constexpr iterator end() noexcept {
-            return &store[0] + size();
+            return &this->_buf[0] + size();
         };
         [[nodiscard]] constexpr const_iterator end() const noexcept {
-            return &store[0] + size();
+            return &this->_buf[0] + size();
         };
         [[nodiscard]] constexpr const_iterator cend() const noexcept {
-            return &store[0] + size();
+            return &this->_buf[0] + size();
         };
         // rend's
         [[nodiscard]] constexpr reverse_iterator rend() noexcept {
@@ -421,13 +588,13 @@ namespace stack_vector {
         };
         // size
         constexpr size_type size() const noexcept {
-            return _size;
+            return this->_size;
         };
         // capacity (constant)
         constexpr size_type capacity() const noexcept {
             return N;
         };
-        // max_size (constant)
+        // maxthis->_size (constant)
         constexpr size_type max_size() const noexcept {
             return N;
         };
@@ -435,10 +602,17 @@ namespace stack_vector {
         // shrink_to_fit (unimplemented or noop)
         // ::std::uninitialized_fill(this->begin(), this->end(), Elt);
         constexpr void clear() noexcept {
-            if constexpr (!::std::is_trivially_destructible<element_type>::value) {
-                ::stack_vector::details::destroy(begin(), end());
+            if constexpr (!::std::is_trivially_destructible<value_type>::value) {
+                if (::std::is_constant_evaluated()) {
+                    if (this->_using_buf) {
+                        this->_buf = array_type{};
+                    }
+                    //::stack_vector::details::destroy(begin(), end());
+                } else {
+                    ::stack_vector::details::destroy(begin(), end());
+                }
             }
-            _size = 0ULL;
+            this->_size = 0ULL;
         };
         // insert's TODO!
         // be sure to verify range
@@ -477,7 +651,7 @@ namespace stack_vector {
                     T tmp = value;
                     std::move_backward(insert_ptr, old_end, old_end + remaining_capacity);
                     ::stack_vector::details::uninitialized_fill_n(pos, remaining_capacity, tmp);
-                    _size += count;
+                    this->_size += count;
                 }
             } else if (one_at_back) {
                 unchecked_emplace_back(value);
@@ -485,7 +659,7 @@ namespace stack_vector {
                 T tmp = value;
                 std::move_backward(insert_ptr, old_end, old_end + count);
                 ::stack_vector::details::uninitialized_fill_n(pos, count, tmp); // ok?
-                _size += count;
+                this->_size += count;
             }
             return iterator(insert_ptr);
         };
@@ -503,7 +677,7 @@ namespace stack_vector {
                 if (!full())
                     [[likely]] {
                         ::new ((void *)ret_it) T(::std::forward<Args>(args)...);
-                        _size += 1;
+                        this->_size += 1;
                         return ret_it;
                     }
                 else { // error?
@@ -524,7 +698,7 @@ namespace stack_vector {
             // first last, destination
             ::std::move_backward(begin() + insert_idx, end() - 1, end());
             // up the size
-            _size += 1;
+            this->_size += 1;
             // insert the value
             *ret_it = ::std::move(tmp);
 
@@ -541,11 +715,11 @@ namespace stack_vector {
         // shove_back's (unchecked_push_back)
         constexpr void shove_back(const T &value) {
             ::new ((void *)end()) T(::std::forward<const T &>(value));
-            _size += 1;
+            this->_size += 1;
         }
         constexpr void shove_back(T &&value) {
             ::new ((void *)end()) T(::std::forward<T &&>(value));
-            _size += 1;
+            this->_size += 1;
         }
         // emplace_back's
         template <class... Args> constexpr reference emplace_back(Args &&... args) {
@@ -553,7 +727,7 @@ namespace stack_vector {
             if (size() < capacity())
                 [[likely]] {
                     ::new ((void *)it) T(::std::forward<Args>(args)...);
-                    _size += 1;
+                    this->_size += 1;
                 }
             else { // error?
                 if constexpr (::stack_vector::details::error_handler ==
@@ -563,10 +737,11 @@ namespace stack_vector {
             }
             return *it;
         };
+
         template <class... Args> constexpr reference unchecked_emplace_back(Args &&... args) {
             iterator it = end();
-            ::new ((void *)it) T(::std::forward<Args>(args)...);
-            _size += 1;
+            ::new ((void *)it) value_type(::std::forward<Args>(args)...);
+            this->_size += 1;
             return *it;
         };
 
@@ -574,11 +749,11 @@ namespace stack_vector {
         constexpr void pop_back() {
             if (size())
                 [[likely]] {
-                    if constexpr (::std::is_trivially_destructible<element_type>::value) {
-                        _size -= 1;
+                    if constexpr (::std::is_trivially_destructible<value_type>::value) {
+                        this->_size -= 1;
                     } else {
-                        _size -= 1;
-                        end()->~T(); // destroy the tailing value
+                        this->_size -= 1;
+                        end()->~value_type(); // destroy the tailing value
                     }
                 }
             else { // error?
@@ -602,7 +777,7 @@ namespace stack_vector {
                 *dest = ::std::move(*first);
             }
             ::stack_vector::details::destroy_at(end() - 1);
-            _size -= 1;
+            this->_size -= 1;
             return begin() + erase_idx;
         }
         constexpr iterator
@@ -624,7 +799,7 @@ namespace stack_vector {
                     *dest = ::std::move(*_first);
                 }
                 ::stack_vector::details::destroy(end() - erase_count, end());
-                _size -= erase_count;
+                this->_size -= erase_count;
             }
             return begin() + erase_idx;
         }
@@ -636,15 +811,22 @@ namespace stack_vector {
                 return;
             if constexpr (::std::is_pod<T>::value) {
                 // swap the data
-                ::std::swap(*reinterpret_cast<array_type *>(&store),
-                            *reinterpret_cast<array_type *>(&other.store));
+                if (::std::is_constant_evaluated()) {
+                    if (this->_using_buf) {
+                        ::std::swap(this->_buf, other._buf);
+                    } else {
+                        ::std::swap(this->_buf, other._buf);
+                    }
+                } else {
+                    ::std::swap(this->_buf, other._buf);
+                }
             } else {
                 stack_vector tmp = *this; // meh
                 assign(other);
                 other.assign(tmp);
             }
             // swap the sizes
-            ::std::swap(_size, other._size);
+            ::std::swap(this->_size, other._size);
         }
     };
     template <class T, size_t N0, size_t N1>
