@@ -137,10 +137,10 @@ int main() {
 
     std::cout << output;
 
-    constexpr stack_vector::stack_vector<int, 5> constexpr_test = {0, 1, 2, 3, 4};
+    constexpr stack_vector::stack_vector<int, 5> constexpr_test = {0, 1, 2, 3};
     for (const auto &int_val : constexpr_test) {
         output += std::to_string(int_val) + "\n";
     }
-
+    
     return 0;
 }
