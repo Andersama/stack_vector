@@ -135,12 +135,35 @@ int main() {
         output += std::to_string(int_val) + "\n";
     }
 
-    std::cout << output;
+    output += "___\n";
 
-    constexpr stack_vector::stack_vector<int, 5> constexpr_test = {0, 1, 2, 3};
+    constexpr stack_vector::stack_vector<int, 5> constexpr_test = {0, 1, 2};
     for (const auto &int_val : constexpr_test) {
         output += std::to_string(int_val) + "\n";
     }
-    
+    constexpr auto  constexpr_insert_test_func = [](const stack_vector::stack_vector<int, 5> insert_me) {
+        stack_vector::stack_vector<int, 2>  blank{};
+        blank.insert(blank.begin(),2ULL,1);
+        stack_vector::stack_vector<int, 10> constexpr_insert_test = {1};
+        stack_vector::stack_vector<int, 5>  assign_test           = {2};
+        stack_vector::stack_vector<int, 10> swap_test = {3, 4};
+        constexpr_insert_test                                     = assign_test;
+        ::std::swap(constexpr_insert_test, swap_test);
+
+        constexpr_insert_test.insert(constexpr_insert_test.begin()+1, insert_me.begin(), insert_me.end());
+        constexpr_insert_test.insert(constexpr_insert_test.begin()+1, 5ULL, 5);
+        constexpr_insert_test.erase(constexpr_insert_test.begin()+1);
+
+
+        return constexpr_insert_test;
+    }(constexpr_test);
+
+    output += "___\n";
+    for (const auto &int_val : constexpr_insert_test_func) {
+        output += std::to_string(int_val) + "\n";
+    }
+
+    std::cout << output;
+
     return 0;
 }
