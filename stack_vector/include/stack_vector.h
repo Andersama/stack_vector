@@ -47,12 +47,6 @@ namespace stack_vector {
 
     template <typename T> struct alignas(alignof(T)) non_trivial_struct {
         constexpr non_trivial_struct() noexcept {};
-        constexpr T *as_ptr() noexcept {
-            return reinterpret_cast<T *>(this);
-        }
-        constexpr const T *as_ptr() const noexcept {
-            return reinterpret_cast<const T *>(this);
-        }
     };
 
     template <typename T, size_t N, bool = ::std::is_trivially_destructible<T>::value>
@@ -61,11 +55,9 @@ namespace stack_vector {
         union {
             non_trivial_struct<value_type> _dummy;
             value_type                     _buf[N];
-            //::std::array<value_type, N>    _buf;
         };
         uint32_t _size;
         uint32_t _more_inited;
-        // uint8_t  _using_buf;
         constexpr stack_vector_destruct_base() noexcept : _dummy{}, _size{0}, _more_inited{0} {};
     };
 
@@ -74,11 +66,9 @@ namespace stack_vector {
         union {
             non_trivial_struct<value_type> _dummy;
             value_type                     _buf[N];
-            //::std::array<value_type, N>    _buf;
         };
         uint32_t _size;
         uint32_t _more_inited;
-        // uint32_t _using_buf;
         constexpr stack_vector_destruct_base() noexcept : _dummy{}, _size{0}, _more_inited{0} {};
         ~stack_vector_destruct_base() noexcept {
             if constexpr (::std::is_constant_evaluated()) {
@@ -362,6 +352,13 @@ namespace stack_vector {
         // constructor's (done)
         constexpr stack_vector() noexcept {
             // default, do absolutely nothing
+            if (::std::is_constant_evaluated()) {
+                for (size_t i = 0; i < N; i++) {
+                    this->_buf[i] = value_type();
+                }
+                this->_size        = 0;
+                this->_more_inited = N;
+            }
         }
         constexpr stack_vector(size_type count, const T &value) {
             // if (count)
@@ -1183,10 +1180,11 @@ namespace stack_vector {
                     ::stack_vector::details::destroy(dest, first); //destroy the inbetweens
                     */
                 // erase everything else
-                ::stack_vector::details::destroy(begin()+size(), begin()+(size()+init_size()));
-
-                if constexpr (::std::is_trivially_destructible<value_type>::value)
+                if constexpr (!::std::is_trivially_destructible<value_type>::value) {
+                    ::stack_vector::details::destroy(begin() + size(), begin() + (size() + init_size()));
                     this->_more_inited = 0;
+                }
+
                 this->_size -= 1;
                 return begin() + erase_idx;
             }
@@ -1209,7 +1207,7 @@ namespace stack_vector {
                         this->_buf[i] = this->_buf[i + offset];
                     }
 
-                    if constexpr (::std::is_trivially_destructible<value_type>::value)
+                    if constexpr (!::std::is_trivially_destructible<value_type>::value)
                         this->_more_inited += offset;
                 }
                 return begin() + erase_idx;
@@ -1227,11 +1225,12 @@ namespace stack_vector {
                     if (dest < first)
                         ::stack_vector::details::destroy(dest, first_moved); // destroy the inbetweens
                     // destroy everything else
-                    ::stack_vector::details::destroy(begin() + size(), begin() + (size() + init_size()));
+                    if constexpr (!::std::is_trivially_destructible<value_type>::value) {
+                        ::stack_vector::details::destroy(begin() + size(), begin() + (size() + init_size()));
+                        this->_more_inited = 0;
+                    }
                     //::stack_vector::details::destroy(end() - erase_count, begin() + (size() + init_size()));
                     this->_size -= erase_count;
-                    if constexpr (::std::is_trivially_destructible<value_type>::value)
-                        this->_more_inited = 0;
                 }
                 return begin() + erase_idx;
             }
