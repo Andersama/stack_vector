@@ -144,6 +144,9 @@ int main() {
     constexpr auto  constexpr_insert_test_func = [](const stack_vector::stack_vector<int, 5> insert_me) {
         stack_vector::stack_vector<int, 2>  blank{};
         blank.insert(blank.begin(),2ULL,1);
+        blank.resize(0);
+        blank.resize(1);
+        blank.resize(2,2);
         stack_vector::stack_vector<int, 10> constexpr_insert_test = {1};
         stack_vector::stack_vector<int, 5>  assign_test           = {2};
         stack_vector::stack_vector<int, 10> swap_test = {3, 4};
@@ -155,7 +158,7 @@ int main() {
         constexpr_insert_test.erase(constexpr_insert_test.begin()+1);
 
 
-        return constexpr_insert_test;
+        return blank;
     }(constexpr_test);
 
     output += "___\n";
