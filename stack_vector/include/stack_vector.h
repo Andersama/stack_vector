@@ -45,7 +45,7 @@ namespace stack_vector {
         constexpr const error_handling error_handler = error_handling::_noop;
     }; // namespace details
 
-    template <typename T> struct alignas(alignof(T)) non_trivial_struct {
+    struct non_trivial_struct {
         constexpr non_trivial_struct() noexcept {};
     };
 
@@ -53,8 +53,8 @@ namespace stack_vector {
     struct stack_vector_destruct_base {
         using value_type = typename ::std::remove_const_t<T>;
         union {
-            non_trivial_struct<value_type> _dummy;
-            value_type                     _buf[N];
+            non_trivial_struct _dummy;
+            value_type         _buf[N];
         };
         uint32_t _size;
         uint32_t _more_inited;
@@ -64,8 +64,8 @@ namespace stack_vector {
     template <typename T, size_t N> struct stack_vector_destruct_base<T, N, false> {
         using value_type = ::std::remove_const_t<T>;
         union {
-            non_trivial_struct<value_type> _dummy;
-            value_type                     _buf[N];
+            non_trivial_struct _dummy;
+            value_type         _buf[N];
         };
         uint32_t _size;
         uint32_t _more_inited;
@@ -589,15 +589,6 @@ namespace stack_vector {
                     size_t i = 0;
                     for (; i < N && first != last; ++i, ++first)
                         this->_buf[i] = *first;
-                    /*
-                    size_t inited = (size() + init_size()) <= N ? (size() + init_size()) : N;
-                    for (; i < inited && first != last; ++i, ++first) {
-                        this->_buf[i] = *first;
-                    }
-                    for (; i < N && first != last; ++i, ++first) {
-                        this->_buf[i].value_type(*first);
-                    }
-                    */
                     if constexpr (!::std::is_trivially_destructible<value_type>::value) {
                         size_t diff = this->_size - i;
                         this->_more_inited += diff;
@@ -746,7 +737,7 @@ namespace stack_vector {
         // back's (done)
         [[nodiscard]] constexpr reference back() {
             assert(!empty());
-            return this->_buf[size()-1];
+            return this->_buf[size() - 1];
         };
         [[nodiscard]] constexpr const_reference back() const {
             assert(!empty());
@@ -847,16 +838,10 @@ namespace stack_vector {
         constexpr iterator insert(const_iterator pos, size_type count, const value_type &value) {
             const_pointer insert_ptr = &(*pos);
             const_pointer old_end    = &(*end());
-            /*
-            const pointer old_begin  = &(*begin());
-            const pointer old_end    = &(*end());
-            const pointer new_end    = old_end + count;
-            const T *     value_ptr  = &value;
-            */
+
             assert(pos >= cbegin() && pos <= cend() &&
                    "insert iterator is out of bounds of the stack_vector");
 
-            // size_type  insert_idx         = pos - cend();
             size_type  remaining_capacity = capacity() - size();
             const bool one_at_back        = (count == 1) && (insert_ptr == old_end);
             if (count == 0) {                        // do nothing
@@ -1168,10 +1153,10 @@ namespace stack_vector {
                 return begin() + erase_idx;
             } else {
                 // move on top
-                iterator first = begin() + erase_idx + 1;
+                iterator first       = begin() + erase_idx + 1;
                 iterator first_moved = first;
-                iterator last  = end();
-                iterator dest  = begin() + erase_idx;
+                iterator last        = end();
+                iterator dest        = begin() + erase_idx;
                 for (; first != last; ++dest, (void)++first) {
                     *dest = ::std::move(*first);
                 }
@@ -1260,7 +1245,7 @@ namespace stack_vector {
                     }
                 } else {
                     if constexpr (::stack_vector::details::error_handler ==
-                          ::stack_vector::details::error_handling::_exception) {
+                                  ::stack_vector::details::error_handling::_exception) {
                         throw std::bad_alloc("stack_vector cannot allocate to resize");
                     }
                 }
