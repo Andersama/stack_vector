@@ -15,5 +15,6 @@ target_include_directories(stack_vector_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 	"${CMAKE_CURRENT_SOURCE_DIR}/tests"
 )
+set_property (TARGET stack_vector_test PROPERTY CXX_STANDARD 20)
 
 # TODO: Add tests and install targets if needed.

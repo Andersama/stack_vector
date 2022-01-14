@@ -4,7 +4,53 @@
 #include <iostream>
 #include <string>
 
+constexpr bool constexpr_test() {
+    bool                               test_ok = false;
+    stack_vector::stack_vector<int, 5> test;
+    test_ok = test.size() == 0;
+    test_ok &= test.capacity() == 5;
+    test.emplace_back(0);
+    test_ok &= test[0] == 0;
+    test_ok &= test.size() == 1;
+    test.emplace_back(1);
+    test_ok &= test[0] == 0;
+    test_ok &= test[1] == 1;
+    test_ok &= test.size() == 2;
+    test.shove_back(2);
+    test_ok &= test[0] == 0;
+    test_ok &= test[1] == 1;
+    test_ok &= test[2] == 2;
+    test_ok &= test.size() == 3;
+    test.pop_back();
+    test_ok &= test[0] == 0;
+    test_ok &= test.back() == 1;
+    test_ok &= test.size() == 2;
+    test.clear();
+    test_ok &= test.size() == 0;
+
+    for (size_t i = 0; i < test.max_size(); i++) {
+        test.shove_back(i);
+    }
+    for (size_t i = 0; i < test.capacity(); i++) {
+        test_ok &= test[i] == test.begin()[i];
+        test_ok &= test[i] == i;
+    }
+    test_ok &= test.size() == test.capacity();
+
+    test.pop_back();
+    test.pop_back();
+    test_ok &= test.size() == (test.capacity() - 2);
+
+    return test_ok;
+}
+
 int main() {
+    if (!constexpr_test()) {
+        std::cout << "constexpr test failed!\n";
+    } else {
+        std::cout << "constexpr tests ok!\n";
+    }
+
     std::string                        output = "";
     stack_vector::stack_vector<int, 5> test;
     test.emplace_back(0);
