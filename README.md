@@ -3,14 +3,13 @@ A fixed capacity vector, or a variable length array for c++20, for dynamic array
 
 Implements most of vector functions except those dealing with resizing.
 
-TODO:
-* Allow some form of error for when inserts / push_backs go beyond the capacity
-
 Notes:
-Size doesn't necessarily need it's own particular address relative to the internal [], technically it may be placed in front or behind the [].
-I chose in front, this may lose in terms of memory size / layout for large types.
+Size doesn't necessarily need it's own particular address relative to the internal array, technically it may be placed in front or behind the array.
+If not being passed around it could even be completely disconnected.
+ 
+In this implementation I chose in front, this may lose in terms of memory size / layout for large types.
 
-Currently eaither noop's or saturates capacity when insertions are too large.
+The default error handling behavior eaither noop's or saturates capacity when insertions are too large.
 
 ## Extras
 Given a known size at compile time it may be handy to have a few extra tools available for inserting and appending data.
